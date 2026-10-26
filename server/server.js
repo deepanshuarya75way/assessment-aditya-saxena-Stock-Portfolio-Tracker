@@ -44,15 +44,28 @@ const getActiveSymbols = () => {
   return Array.from(active);
 };
 
+const emitToSubscribers=(symbol,stockData)=>{
+  const key= normalizeSymbol(stockData.symbol|| symbol).displaySymbol;
+  let recipients=0;
+  for(const [socketId, symSet] of socketSubscriptions){
+    if(symSet.has(key)){
+      io.to(socketId).emit('priceUpdate',stockData);
+      recipients++;
+    }
+  }
+  return recipents;
+};
+
 // Client socket connection & subscription handling
 io.on('connection', (socket) => {
   console.log('🔌 New client connected:', socket.id);
   socketSubscriptions.set(socket.id, new Set());
 
   // Subscribe to specific stock symbols
-  socket.on('subscribe:symbols', (symbols) => {
+  socket.on('subscribe:symbols', async(symbols) => {
     if (Array.isArray(symbols)) {
       const clientSet = socketSubscriptions.get(socket.id) || new Set();
+      const added=[];
       symbols.forEach((sym) => {
         if (typeof sym === 'string' && sym.trim()) {
           const norm = normalizeSymbol(sym.trim());
@@ -61,7 +74,20 @@ io.on('connection', (socket) => {
       });
       socketSubscriptions.set(socket.id, clientSet);
       console.log(`📡 Socket ${socket.id} subscribed to:`, Array.from(clientSet));
+      for(const sym of added){
+        try{
+          const stockData=await getStockPrice(sym);
+          if(stockData && stockData.currentPrice>0){
+            socket.emit('priceUpdate',stockData);
+          }
+        }  
+          catch (error){
+            console.log(`initial price failed for  ${sym}`,error.message);
+          }
+        }
+      }
     }
+    
   });
 
   // Unsubscribe from symbols
